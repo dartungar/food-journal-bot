@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    build: ./bot
+    container_name: food-journal-bot
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_PATH=/app/data/food_journal.db
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - food_journal_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3; sqlite3.connect('/app/data/food_journal.db').close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    tty: true
+    stdin_open: true
+
+volumes:
+  food_journal_data:
+    driver: local

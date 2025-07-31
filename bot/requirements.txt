@@ -1,0 +1,6 @@
+python-telegram-bot==20.7
+openai>=1.14.0
+pydantic==2.5.0
+python-dotenv==1.0.0
+pillow==10.1.0
+apscheduler==3.10.4
