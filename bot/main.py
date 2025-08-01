@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from handlers.food_handler import handle_food_photo, handle_audio
 from handlers.summary_handler import daily_summary, weekly_summary
+from handlers.timezone_handler import set_timezone
 from services.ai_summary_service import AISummaryService
 from services.scheduler_service import AutomatedSummaryService
 from services.database_service import DatabaseService
@@ -46,6 +47,7 @@ async def start(update, context):
         "**Available Commands:**\n"
         "/daily - Get AI-generated daily nutrition summary\n"
         "/weekly - Get AI-powered weekly analysis with insights\n"
+        "/settimezone <tz> - Set your timezone (e.g., /settimezone Europe/Berlin)\n"
         "/help - Show this help message\n\n"
         "**🤖 AI-Powered Features:**\n"
         "🌙 **Smart Daily Summaries** - Delivered at 9 PM with personalized insights\n"
@@ -66,6 +68,7 @@ async def help_command(update, context):
         "**Commands:**\n"
         "/daily - Get today's AI nutrition analysis\n"
         "/weekly - Get this week's AI-powered insights\n"
+        "/settimezone <tz> - Set your timezone (e.g., /settimezone Europe/Berlin)\n"
         "/start - Welcome message\n"
         "/help - This help message\n\n"
         "**🧠 AI Features:**\n"
@@ -102,6 +105,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler('help', help_command))
     application.add_handler(CommandHandler('daily', daily_summary))
     application.add_handler(CommandHandler('weekly', weekly_summary))
+    application.add_handler(CommandHandler('settimezone', set_timezone))
     application.add_handler(MessageHandler(filters.PHOTO, handle_food_photo))
     application.add_handler(MessageHandler(filters.VOICE, handle_audio))
 

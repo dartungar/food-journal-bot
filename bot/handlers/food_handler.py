@@ -1,20 +1,10 @@
-from telegram import Update
-from telegram.ext import ContextTypes
-from services.ai_service import AIFoodAnalyzer
-import os
-
-ai_analyzer = AIFoodAnalyzer(os.getenv('OPENAI_API_KEY'))
-
-logger = logging.getLogger(__name__)
-
 import logging
+import os
 from telegram import Update
 from telegram.ext import ContextTypes
 from services.ai_service import AIFoodAnalyzer
-import os
 
 ai_analyzer = AIFoodAnalyzer(os.getenv('OPENAI_API_KEY'))
-
 logger = logging.getLogger(__name__)
 
 # Access control: get allowed user IDs from env variable
@@ -24,6 +14,7 @@ def get_allowed_user_ids():
 
 def is_user_allowed(user_id):
     return user_id in get_allowed_user_ids()
+
 async def handle_food_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle food photo upload and analysis"""
     user_id = update.effective_user.id

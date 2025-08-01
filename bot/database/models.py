@@ -8,6 +8,7 @@ class User:
     telegram_user_id: int
     username: Optional[str] = None
     first_name: Optional[str] = None
+    timezone: Optional[str] = None  # e.g., 'Europe/Berlin', 'America/New_York'
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

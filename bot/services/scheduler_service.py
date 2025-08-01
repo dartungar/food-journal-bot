@@ -1,5 +1,6 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
+import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from services.ai_summary_service import AISummaryService
@@ -35,49 +36,50 @@ class AutomatedSummaryService:
             replace_existing=True
         )
 
-        # Food tracking reminders at 10:00, 15:00, and 20:00 every day
+        # Per-user timezone-aware reminders: check every minute
         self.scheduler.add_job(
-            self.send_food_reminder,
-            CronTrigger(hour=10, minute=0),
-            id='food_reminder_10',
-            replace_existing=True
-        )
-        self.scheduler.add_job(
-            self.send_food_reminder,
-            CronTrigger(hour=15, minute=0),
-            id='food_reminder_15',
-            replace_existing=True
-        )
-        self.scheduler.add_job(
-            self.send_food_reminder,
-            CronTrigger(hour=20, minute=0),
-            id='food_reminder_20',
+            self.send_food_reminders_timezone_aware,
+            CronTrigger(minute='*'),
+            id='food_reminder_timezone_aware',
             replace_existing=True
         )
 
         self.scheduler.start()
         logger.info("Automated AI summary scheduler started")
-    async def send_food_reminder(self):
-        """Send a reminder to all users to track their food"""
+    async def send_food_reminders_timezone_aware(self):
+        """Send food reminders at 10:00, 15:00, and 20:00 in each user's local timezone."""
         try:
-            user_ids = self.database_service.db.get_all_user_ids()
+            reminder_times = [dt_time(10, 0), dt_time(15, 0), dt_time(20, 0)]
+            users = self.database_service.get_all_users_with_timezones()
+            now_utc = datetime.now(datetime.timezone.utc).replace(second=0, microsecond=0)
             reminder_message = (
                 "⏰ **Don't forget to track your food!**\n\n"
                 "Send a photo or description of your meal to keep your nutrition log up to date.\n\n"
                 "Consistent tracking helps you get the best AI insights! 📸🥗"
             )
-            for user_id in user_ids:
+            for user in users:
+                tzname = user.get('timezone')
+                if not tzname:
+                    continue  # skip users without timezone set
                 try:
-                    await self.bot.send_message(
-                        chat_id=user_id,
-                        text=reminder_message,
-                        parse_mode='Markdown'
-                    )
-                    await asyncio.sleep(0.5)  # Avoid rate limiting
-                except Exception as e:
-                    logger.error(f"Error sending food reminder to user {user_id}: {e}")
+                    user_tz = pytz.timezone(tzname)
+                except Exception:
+                    logger.error(f"Invalid timezone for user {user['telegram_user_id']}: {tzname}")
+                    continue
+                user_now = now_utc.astimezone(user_tz)
+                user_time = user_now.time().replace(second=0, microsecond=0)
+                if any(user_time == t for t in reminder_times):
+                    try:
+                        await self.bot.send_message(
+                            chat_id=user['telegram_user_id'],
+                            text=reminder_message,
+                            parse_mode='Markdown'
+                        )
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        logger.error(f"Error sending food reminder to user {user['telegram_user_id']}: {e}")
         except Exception as e:
-            logger.error(f"Error in send_food_reminder: {e}")
+            logger.error(f"Error in send_food_reminders_timezone_aware: {e}")
     
     async def send_daily_ai_summaries(self):
         """Send AI-generated daily summaries to all users"""

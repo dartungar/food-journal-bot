@@ -27,6 +27,7 @@ class Database:
                 telegram_user_id INTEGER UNIQUE NOT NULL,
                 username TEXT,
                 first_name TEXT,
+                timezone TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -75,7 +76,7 @@ class Database:
     def get_connection(self):
         return sqlite3.connect(self.db_path)
 
-    def create_or_update_user(self, telegram_user_id: int, username: str = None, first_name: str = None) -> int:
+    def create_or_update_user(self, telegram_user_id: int, username: str = None, first_name: str = None, timezone: str = None) -> int:
         with self.get_connection() as db:
             cursor = db.execute(
                 "SELECT id FROM users WHERE telegram_user_id = ?",
@@ -85,15 +86,15 @@ class Database:
             if row:
                 user_id = row[0]
                 db.execute(
-                    "UPDATE users SET username = ?, first_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (username, first_name, user_id)
+                    "UPDATE users SET username = ?, first_name = ?, timezone = COALESCE(?, timezone), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, first_name, timezone, user_id)
                 )
                 db.commit()
                 return user_id
             else:
                 cursor = db.execute(
-                    "INSERT INTO users (telegram_user_id, username, first_name) VALUES (?, ?, ?)",
-                    (telegram_user_id, username, first_name)
+                    "INSERT INTO users (telegram_user_id, username, first_name, timezone) VALUES (?, ?, ?, ?)",
+                    (telegram_user_id, username, first_name, timezone)
                 )
                 db.commit()
                 return cursor.lastrowid
@@ -248,7 +249,7 @@ class Database:
         try:
             with self.get_connection() as db:
                 cursor = db.execute(
-                    "SELECT id, telegram_user_id, username, first_name FROM users WHERE telegram_user_id = ?",
+                    "SELECT id, telegram_user_id, username, first_name, timezone FROM users WHERE telegram_user_id = ?",
                     (telegram_user_id,)
                 )
                 row = cursor.fetchone()
@@ -257,7 +258,8 @@ class Database:
                         'id': row[0],
                         'telegram_user_id': row[1],
                         'username': row[2],
-                        'first_name': row[3]
+                        'first_name': row[3],
+                        'timezone': row[4]
                     }
                 return None
         except Exception as e:

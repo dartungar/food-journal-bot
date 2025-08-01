@@ -8,6 +8,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 class DatabaseService:
+
+    def create_or_update_user(self, telegram_user_id: int, username: str = None, first_name: str = None, timezone: str = None) -> int:
+        """Create or update a user in the database."""
+        db = Database(self.db_path)
+        return db.create_or_update_user(telegram_user_id, username, first_name, timezone)
+
+    def get_user_by_telegram_id(self, telegram_user_id: int) -> Optional[Dict]:
+        """Get user by Telegram user ID (delegates to Database)."""
+        db = Database(self.db_path)
+        return db.get_user_by_telegram_id(telegram_user_id)
+
     def __init__(self, db_path: str):
         self.db_path = db_path
     
@@ -106,4 +117,17 @@ class DatabaseService:
             return telegram_ids
         except Exception as e:
             logger.error(f"Error getting all Telegram user IDs: {e}")
+            return []
+        
+    def get_all_users_with_timezones(self) -> List[Dict]:
+        """Get all users with their Telegram IDs and timezones"""
+        try:
+            db = Database(self.db_path)
+            with db.get_connection() as conn:
+                cursor = conn.execute("SELECT telegram_user_id, timezone FROM users")
+                return [
+                    {'telegram_user_id': row[0], 'timezone': row[1]} for row in cursor.fetchall()
+                ]
+        except Exception as e:
+            logger.error(f"Error getting all users with timezones: {e}")
             return []
