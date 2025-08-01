@@ -26,7 +26,7 @@ class AutomatedSummaryService:
             id='daily_ai_summary',
             replace_existing=True
         )
-        
+
         # Weekly AI summary on Sundays at 8 PM
         self.scheduler.add_job(
             self.send_weekly_ai_summaries,
@@ -34,9 +34,50 @@ class AutomatedSummaryService:
             id='weekly_ai_summary',
             replace_existing=True
         )
-        
+
+        # Food tracking reminders at 10:00, 15:00, and 20:00 every day
+        self.scheduler.add_job(
+            self.send_food_reminder,
+            CronTrigger(hour=10, minute=0),
+            id='food_reminder_10',
+            replace_existing=True
+        )
+        self.scheduler.add_job(
+            self.send_food_reminder,
+            CronTrigger(hour=15, minute=0),
+            id='food_reminder_15',
+            replace_existing=True
+        )
+        self.scheduler.add_job(
+            self.send_food_reminder,
+            CronTrigger(hour=20, minute=0),
+            id='food_reminder_20',
+            replace_existing=True
+        )
+
         self.scheduler.start()
         logger.info("Automated AI summary scheduler started")
+    async def send_food_reminder(self):
+        """Send a reminder to all users to track their food"""
+        try:
+            user_ids = self.database_service.db.get_all_user_ids()
+            reminder_message = (
+                "⏰ **Don't forget to track your food!**\n\n"
+                "Send a photo or description of your meal to keep your nutrition log up to date.\n\n"
+                "Consistent tracking helps you get the best AI insights! 📸🥗"
+            )
+            for user_id in user_ids:
+                try:
+                    await self.bot.send_message(
+                        chat_id=user_id,
+                        text=reminder_message,
+                        parse_mode='Markdown'
+                    )
+                    await asyncio.sleep(0.5)  # Avoid rate limiting
+                except Exception as e:
+                    logger.error(f"Error sending food reminder to user {user_id}: {e}")
+        except Exception as e:
+            logger.error(f"Error in send_food_reminder: {e}")
     
     async def send_daily_ai_summaries(self):
         """Send AI-generated daily summaries to all users"""
