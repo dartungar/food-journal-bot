@@ -1,3 +1,12 @@
+from telegram import Update
+from telegram.ext import ContextTypes
+from services.ai_service import AIFoodAnalyzer
+import os
+
+ai_analyzer = AIFoodAnalyzer(os.getenv('OPENAI_API_KEY'))
+
+logger = logging.getLogger(__name__)
+
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -8,18 +17,30 @@ ai_analyzer = AIFoodAnalyzer(os.getenv('OPENAI_API_KEY'))
 
 logger = logging.getLogger(__name__)
 
+# Access control: get allowed user IDs from env variable
+def get_allowed_user_ids():
+    allowed = os.getenv('ALLOWED_USER_IDS', '')
+    return set(int(uid.strip()) for uid in allowed.split(',') if uid.strip().isdigit())
+
+def is_user_allowed(user_id):
+    return user_id in get_allowed_user_ids()
 async def handle_food_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle food photo upload and analysis"""
     user_id = update.effective_user.id
-    
+
+    if not is_user_allowed(user_id):
+        logger.warning(f"Unauthorized access attempt by user {user_id}.")
+        await update.message.reply_text("🚫 You are not authorized to use this bot.")
+        return
+
     if not update.message.photo:
         logger.warning(f"User {user_id} sent a message without a photo.")
         await update.message.reply_text("Please send a photo of your food!")
         return
-    
+
     logger.info(f"User {user_id} sent a photo. Starting analysis.")
     await update.message.reply_text("🔍 Analyzing your food... This may take a moment.")
-    
+
     try:
         # Get the largest photo
         photo = update.message.photo[-1]

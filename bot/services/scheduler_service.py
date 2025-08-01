@@ -2,10 +2,8 @@ import asyncio
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-
 from services.ai_summary_service import AISummaryService
 from services.database_service import DatabaseService
-from database.database import Database
 from telegram import Bot
 import os
 import logging

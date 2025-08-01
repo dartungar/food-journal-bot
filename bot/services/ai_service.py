@@ -41,7 +41,7 @@ class AIFoodAnalyzer:
             import asyncio
             response = await asyncio.to_thread(
                 self.client.chat.completions.create,
-                model="gpt-4.1-mini-2025-04-14",
+                model="gpt-4.1-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {
@@ -84,7 +84,7 @@ class AIFoodAnalyzer:
             # Step 1: Transcribe audio using Whisper
             transcription = await asyncio.to_thread(
                 self.client.audio.transcriptions.create,
-                model="whisper-1",
+                model="gpt-4o-mini-transcribe",
                 file=audio_bytes_io,
                 language="en"  # You can make this configurable
             )
@@ -108,7 +108,7 @@ class AIFoodAnalyzer:
             
             response = await asyncio.to_thread(
                 self.client.chat.completions.create,
-                model="gpt-4.1-mini-2025-04-14",
+                model="gpt-4.1-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {
