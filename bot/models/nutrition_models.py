@@ -1,5 +1,5 @@
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -39,7 +39,27 @@ class FoodItem(BaseModel):
     confidence: Optional[float] = None
 
 
+class UncertaintyInfo(BaseModel):
+    """Information about AI uncertainty in food analysis"""
+    has_uncertainty: bool = False
+    uncertain_items: List[str] = Field(default_factory=list)
+    uncertainty_reasons: List[str] = Field(default_factory=list)
+    confidence_score: float = 1.0
+
+
 class FoodAnalysisResponse(BaseModel):
     food_items: List[FoodItem] = Field(default_factory=list)
     total_nutrition: NutritionInfo = Field(default_factory=NutritionInfo)
     analysis_timestamp: Optional[datetime] = None
+    uncertainty: Optional[UncertaintyInfo] = None
+
+
+class PendingClarification(BaseModel):
+    """Stores information about pending clarification request"""
+    user_id: int
+    original_data: Dict[str, Any]  # Store original image/audio data
+    analysis_text: str  # Original AI analysis text
+    uncertain_items: List[str]
+    uncertainty_reasons: List[str]
+    timestamp: datetime
+    media_type: str  # 'photo' or 'audio'

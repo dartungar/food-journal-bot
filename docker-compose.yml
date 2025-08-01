@@ -7,6 +7,7 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ALLOWED_USER_IDS=${ALLOWED_USER_IDS}
       - DATABASE_PATH=/app/data/food_journal.db
     restart: unless-stopped
     volumes:
