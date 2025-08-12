@@ -83,7 +83,7 @@ class AIFoodAnalyzer:
                         ]
                     }
                 ],
-                max_tokens=1024
+                max_completion_tokens=1024
             )
             if response.choices and response.choices[0].message and response.choices[0].message.content:
                 text = response.choices[0].message.content
@@ -153,7 +153,7 @@ class AIFoodAnalyzer:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                max_tokens=1024
+                max_completion_tokens=1024
             )
             
             if response.choices and response.choices[0].message and response.choices[0].message.content:
@@ -327,7 +327,7 @@ Uncertainty Assessment:
                             ]
                         }
                     ],
-                    max_tokens=512
+                    max_completion_tokens=512
                 )
                 
                 if response.choices and response.choices[0].message:
@@ -379,7 +379,7 @@ Please provide a final, accurate nutritional analysis that combines this informa
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": combined_prompt}
                 ],
-                max_tokens=1024
+                max_completion_tokens=1024
             )
             
             if response.choices and response.choices[0].message and response.choices[0].message.content:
