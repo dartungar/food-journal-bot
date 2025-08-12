@@ -64,7 +64,7 @@ class AIFoodAnalyzer:
             import asyncio
             response = await asyncio.to_thread(
                 self.client.chat.completions.create,
-                model="gpt-4.1-mini",
+                model="gpt-5-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {
@@ -148,7 +148,7 @@ class AIFoodAnalyzer:
             
             response = await asyncio.to_thread(
                 self.client.chat.completions.create,
-                model="gpt-4.1-mini",
+                model="gpt-5-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -205,11 +205,12 @@ Rules:
 - If no food is identified, return empty food_items array with zero totals
 
 Uncertainty Assessment:
-- Set has_uncertainty to true if you notice any of the following:
-  * Unclear food identification ("some kind of pasta", "looks like chicken")
+- Set has_uncertainty to true if you notice any of the following (but do not be too strict):
+  * Totally unclear food identification (if you're unable to guess food item)
   * Vague quantities ("a bit of", "some", "small portion")
-  * Multiple possible interpretations
+  * Multiple possible interpretations (if both options seem plausible)
   * Poor image quality or unclear audio mentioned
+- Do not ask about brand, try to take some "generic" product if unclear
 - List specific uncertain_items (food names that are unclear)
 - Provide uncertainty_reasons (specific reasons for uncertainty)
 - Set confidence_score between 0.0-1.0 (lower for more uncertainty)
@@ -219,7 +220,7 @@ Uncertainty Assessment:
             
             response = await asyncio.to_thread(
                 self.client.beta.chat.completions.parse,
-                model="gpt-4o-2024-08-06",
+                model="gpt-5",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Parse this nutrition analysis:\n\n{text}"}
@@ -307,7 +308,7 @@ Uncertainty Assessment:
                 import asyncio
                 response = await asyncio.to_thread(
                     self.client.chat.completions.create,
-                    model="gpt-4.1-mini",
+                    model="gpt-5-mini",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {
@@ -373,7 +374,7 @@ Please provide a final, accurate nutritional analysis that combines this informa
             
             response = await asyncio.to_thread(
                 self.client.chat.completions.create,
-                model="gpt-4.1-mini",
+                model="gpt-5-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": combined_prompt}
