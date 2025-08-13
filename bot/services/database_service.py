@@ -9,21 +9,40 @@ logger = logging.getLogger(__name__)
 
 class DatabaseService:
 
-    def create_or_update_user(self, telegram_user_id: int, username: str = None, first_name: str = None, timezone: str = None) -> int:
+    def create_or_update_user(self, telegram_user_id: int, username: str = None, first_name: str = None, timezone: str = None, language: str = None) -> int:
         """Create or update a user in the database."""
         db = Database(self.db_path)
-        return db.create_or_update_user(telegram_user_id, username, first_name, timezone)
+        return db.create_or_update_user(telegram_user_id, username, first_name, timezone, language)
 
     def get_user_by_telegram_id(self, telegram_user_id: int) -> Optional[Dict]:
         """Get user by Telegram user ID (delegates to Database)."""
         db = Database(self.db_path)
         return db.get_user_by_telegram_id(telegram_user_id)
+        
+    def get_user_language(self, telegram_user_id: int) -> str:
+        """Get user's preferred language, default to 'en'"""
+        user = self.get_user_by_telegram_id(telegram_user_id)
+        return user.get('language', 'en') if user else 'en'
+    
+    def update_user_language(self, telegram_user_id: int, language: str) -> bool:
+        """Update user's language preference"""
+        try:
+            db = Database(self.db_path)
+            with db.get_connection() as conn:
+                cursor = conn.execute(
+                    "UPDATE users SET language = ? WHERE telegram_user_id = ?",
+                    (language, telegram_user_id)
+                )
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating user language: {e}")
+            return False
 
     def __init__(self, db_path: str):
         self.db_path = db_path
     
     def store_food_analysis(self, telegram_user_id: int, username: str, first_name: str, 
-                            analysis: FoodAnalysisResponse) -> bool:
+                            analysis: FoodAnalysisResponse, language: str = None) -> bool:
         """Store food analysis in database"""
         from database.database import Database
         try:
@@ -32,8 +51,8 @@ class DatabaseService:
             if not analysis.food_items:
                 logger.warning(f"No food items extracted for user {telegram_user_id}, skipping DB insert.")
                 return False
-            # Create or update user
-            user_id = db.create_or_update_user(telegram_user_id, username, first_name)
+            # Create or update user with language
+            user_id = db.create_or_update_user(telegram_user_id, username, first_name, language=language)
             # Create food entry
             food_entry = FoodEntry(
                 user_id=user_id,
