@@ -11,13 +11,14 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from handlers.food_handler import handle_food_photo, handle_audio, handle_text_message, cancel_clarification, check_clarification_status
+from handlers.food_handler import handle_food_photo, handle_audio, handle_text_message, cancel_clarification, check_clarification_status, get_user_language
 from handlers.summary_handler import daily_summary, weekly_summary
 from handlers.timezone_handler import set_timezone
 from services.ai_summary_service import AISummaryService
 from services.scheduler_service import AutomatedSummaryService
 from services.database_service import DatabaseService
 from services.clarification_service import ClarificationService
+from services.language_service import language_service
 from database.database import Database
 
 
@@ -42,64 +43,60 @@ logger = logging.getLogger(__name__)
 async def start(update, context):
     """Start command handler"""
     user_id = update.effective_user.id
-    welcome_message = (
-        "🍽️ **Welcome to AI Food Journal Bot!**\n\n"
-        "📸 **Send me a photo of your food** and I'll analyze it for you!\n"
-        "🎤 **Send me a voice message** describing what you ate!\n"
-        "📝 **Send me a text message** describing your meal!\n\n"
-        "**Available Commands:**\n"
-        "/daily - Get AI-generated daily nutrition summary\n"
-        "/weekly - Get AI-powered weekly analysis with insights\n"
-        "/settimezone <tz> - Set your timezone (e.g., /settimezone Europe/Berlin)\n"
-        "/status - Check if you have pending clarification requests\n"
-        "/cancel - Cancel pending clarification and start over\n"
-        "/help - Show this help message\n\n"
-        "**🤖 AI-Powered Features:**\n"
-        "🌙 **Smart Daily Summaries** - Delivered at 9 PM with personalized insights\n"
-        "📊 **Weekly AI Analysis** - Comprehensive reports every Sunday at 8 PM\n"
-        "💡 **Personalized Recommendations** - Based on your actual eating patterns\n"
-        "🧠 **Smart Clarification** - I'll ask for clarification when uncertain about your food\n\n"
-        "Just send a food photo, voice message, or text description to get started! 🚀"
-    )
-    await update.message.reply_text(welcome_message, parse_mode='Markdown')
-    logger.info(f"New user started: {user_id}")
+    
+    # Detect language from any additional text in the command
+    command_text = update.message.text if update.message.text else ""
+    user_language = get_user_language(user_id, command_text)
+    messages = language_service.get_messages(user_language)
+    
+    await update.message.reply_text(messages.welcome_message, parse_mode='Markdown')
+    logger.info(f"New user started: {user_id} (language: {user_language})")
 
 async def help_command(update, context):
-    help_text = (
-        "🤖 **AI Food Journal Bot Help**\n\n"
-        "**How to use:**\n"
-        "1. 📸 Send a photo of your food OR 🎤 Send a voice message OR 📝 Send a text message describing it\n"
-        "2. 🤖 I'll analyze it with AI and log the nutrition info\n"
-        "3. 🧠 If I'm uncertain, I'll ask for clarification before saving\n"
-        "4. 📊 Get personalized AI summaries automatically\n\n"
-        "**Commands:**\n"
-        "/daily - Get today's AI nutrition analysis\n"
-        "/weekly - Get this week's AI-powered insights\n"
-        "/settimezone <tz> - Set your timezone (e.g., /settimezone Europe/Berlin)\n"
-        "/status - Check if you have pending clarification requests\n"
-        "/cancel - Cancel pending clarification and start over\n"
-        "/start - Welcome message\n"
-        "/help - This help message\n\n"
-        "**🧠 Smart Clarification Process:**\n"
-        "1. Send your food photo/audio/text\n"
-        "2. If I'm uncertain, I'll ask for clarification\n"
-        "3. Send another photo/voice/text message to clarify\n"
-        "4. I'll combine both to create accurate nutrition data\n\n"
-        "**🧠 AI Features:**\n"
-        "🌙 **Daily AI Summaries (9 PM):**\n"
-        "• Personalized nutrition analysis\n"
-        "• Specific observations about your food choices\n"
-        "• Tomorrow's recommendations\n\n"
-        "📊 **Weekly AI Analysis (Sunday 8 PM):**\n"
-        "• Comprehensive eating pattern analysis\n"
-        "• Trend identification and achievements\n"
-        "• Personalized goals for next week\n\n"
-        "**Tips:**\n"
-        "• Take clear, well-lit photos of your entire meal\n"
-        "• Speak clearly when recording voice messages\n"
-        "• Be specific about quantities and ingredients in text descriptions"
-    )
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    user_id = update.effective_user.id
+    
+    # Detect language
+    command_text = update.message.text if update.message.text else ""
+    user_language = get_user_language(user_id, command_text)
+    messages = language_service.get_messages(user_language)
+    
+    await update.message.reply_text(messages.help_message, parse_mode='Markdown')
+
+async def set_language(update, context):
+    """Set language preference command handler"""
+    user_id = update.effective_user.id
+    
+    # Check if language was provided
+    if context.args and len(context.args) > 0:
+        requested_language = context.args[0].lower()
+        
+        if requested_language in ['en', 'english', 'английский']:
+            new_language = 'en'
+        elif requested_language in ['ru', 'russian', 'русский']:
+            new_language = 'ru'
+        else:
+            # Default to detecting from the command text
+            command_text = update.message.text if update.message.text else ""
+            current_language = get_user_language(user_id, command_text)
+            messages = language_service.get_messages(current_language)
+            await update.message.reply_text(messages.language_help_message)
+            return
+        
+        # Update user language in database
+        from services.database_service import DatabaseService
+        db_path = os.getenv('DATABASE_PATH', '/app/data/food_journal.db')
+        db_service = DatabaseService(db_path)
+        db_service.update_user_language(user_id, new_language)
+        
+        # Send confirmation in the new language
+        messages = language_service.get_messages(new_language)
+        await update.message.reply_text(messages.language_set_message)
+        logger.info(f"User {user_id} changed language to {new_language}")
+    else:
+        # No arguments provided, show help
+        current_language = get_user_language(user_id, "")
+        messages = language_service.get_messages(current_language)
+        await update.message.reply_text(messages.language_help_message)
 
 # === Entrypoint ===
 
@@ -128,6 +125,7 @@ if __name__ == "__main__":
     # Register handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('setlanguage', set_language))
     application.add_handler(CommandHandler('daily', daily_summary))
     application.add_handler(CommandHandler('weekly', weekly_summary))
     application.add_handler(CommandHandler('settimezone', set_timezone))

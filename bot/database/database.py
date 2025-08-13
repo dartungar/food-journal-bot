@@ -17,6 +17,9 @@ class Database:
         with sqlite3.connect(self.db_path) as db:
             self._create_tables(db)
             db.commit()
+        # Run migrations after table creation
+        from database.migrations import run_migrations
+        run_migrations(self.db_path)
         logger.info(f"Database initialized at {self.db_path}")
 
     def _create_tables(self, db: sqlite3.Connection):
@@ -28,6 +31,7 @@ class Database:
                 username TEXT,
                 first_name TEXT,
                 timezone TEXT,
+                language TEXT DEFAULT 'en',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -76,7 +80,7 @@ class Database:
     def get_connection(self):
         return sqlite3.connect(self.db_path)
 
-    def create_or_update_user(self, telegram_user_id: int, username: str = None, first_name: str = None, timezone: str = None) -> int:
+    def create_or_update_user(self, telegram_user_id: int, username: str = None, first_name: str = None, timezone: str = None, language: str = None) -> int:
         with self.get_connection() as db:
             cursor = db.execute(
                 "SELECT id FROM users WHERE telegram_user_id = ?",
@@ -86,15 +90,15 @@ class Database:
             if row:
                 user_id = row[0]
                 db.execute(
-                    "UPDATE users SET username = ?, first_name = ?, timezone = COALESCE(?, timezone), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (username, first_name, timezone, user_id)
+                    "UPDATE users SET username = ?, first_name = ?, timezone = COALESCE(?, timezone), language = COALESCE(?, language), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, first_name, timezone, language, user_id)
                 )
                 db.commit()
                 return user_id
             else:
                 cursor = db.execute(
-                    "INSERT INTO users (telegram_user_id, username, first_name, timezone) VALUES (?, ?, ?, ?)",
-                    (telegram_user_id, username, first_name, timezone)
+                    "INSERT INTO users (telegram_user_id, username, first_name, timezone, language) VALUES (?, ?, ?, ?, ?)",
+                    (telegram_user_id, username, first_name, timezone, language or 'en')
                 )
                 db.commit()
                 return cursor.lastrowid
@@ -249,7 +253,7 @@ class Database:
         try:
             with self.get_connection() as db:
                 cursor = db.execute(
-                    "SELECT id, telegram_user_id, username, first_name, timezone FROM users WHERE telegram_user_id = ?",
+                    "SELECT id, telegram_user_id, username, first_name, timezone, language FROM users WHERE telegram_user_id = ?",
                     (telegram_user_id,)
                 )
                 row = cursor.fetchone()
@@ -259,7 +263,8 @@ class Database:
                         'telegram_user_id': row[1],
                         'username': row[2],
                         'first_name': row[3],
-                        'timezone': row[4]
+                        'timezone': row[4],
+                        'language': row[5]
                     }
                 return None
         except Exception as e:
