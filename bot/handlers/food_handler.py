@@ -2,7 +2,7 @@ import logging
 import os
 import base64
 from datetime import datetime
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from services.ai_service import AIFoodAnalyzer
 from services.clarification_service import ClarificationService
@@ -13,6 +13,15 @@ from services.database_service import DatabaseService
 ai_analyzer = AIFoodAnalyzer(os.getenv('OPENAI_API_KEY'))
 clarification_service = ClarificationService()
 logger = logging.getLogger(__name__)
+
+def create_clarification_inline_keyboard(language='en'):
+    """Create inline keyboard for clarification requests"""
+    if language == 'ru':
+        keyboard = [[InlineKeyboardButton("❌ Прервать прояснение", callback_data="abort_clarification")]]
+    else:
+        keyboard = [[InlineKeyboardButton("❌ Abort clarification", callback_data="abort_clarification")]]
+    
+    return InlineKeyboardMarkup(keyboard)
 
 # Access control: get allowed user IDs from env variable
 def get_allowed_user_ids():
@@ -148,7 +157,14 @@ async def handle_food_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     user_language, analysis
                 )
                 
-                await update.message.reply_text(clarification_msg, parse_mode='Markdown')
+                # Create inline keyboard for clarification
+                inline_keyboard = create_clarification_inline_keyboard(user_language)
+                
+                await update.message.reply_text(
+                    clarification_msg, 
+                    parse_mode='Markdown',
+                    reply_markup=inline_keyboard
+                )
                 logger.info(f"Asked user {user_id} for clarification due to uncertainties.")
                 return
             
@@ -273,7 +289,14 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     user_language, analysis, description=text_description, is_text=True
                 )
                 
-                await update.message.reply_text(clarification_msg, parse_mode='Markdown')
+                # Create inline keyboard for clarification
+                inline_keyboard = create_clarification_inline_keyboard(user_language)
+                
+                await update.message.reply_text(
+                    clarification_msg, 
+                    parse_mode='Markdown',
+                    reply_markup=inline_keyboard
+                )
                 logger.info(f"Asked user {user_id} for clarification due to uncertainties in text.")
                 return
             
@@ -457,7 +480,14 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     user_language, analysis, description=transcribed_text, is_audio=True
                 )
                 
-                await update.message.reply_text(clarification_msg, parse_mode='Markdown')
+                # Create inline keyboard for clarification
+                inline_keyboard = create_clarification_inline_keyboard(user_language)
+                
+                await update.message.reply_text(
+                    clarification_msg, 
+                    parse_mode='Markdown',
+                    reply_markup=inline_keyboard
+                )
                 logger.info(f"Asked user {user_id} for clarification due to uncertainties in audio.")
                 return
 

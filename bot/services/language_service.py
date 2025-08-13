@@ -103,6 +103,7 @@ class LanguageService:
 /daily - Get AI-generated daily nutrition summary
 /weekly - Get AI-powered weekly analysis with insights
 /settimezone <tz> - Set your timezone (e.g., /settimezone Europe/Berlin)
+/setlanguage <lang> - Set your language preference (en/ru)
 /status - Check if you have pending clarification requests
 /cancel - Cancel pending clarification and start over
 /help - Show this help message
@@ -203,6 +204,7 @@ The bot will automatically detect language from your messages, but you can set a
 /daily - Получить ИИ-анализ питания за день
 /weekly - Получить ИИ-анализ питания за неделю с инсайтами
 /settimezone <tz> - Установить часовой пояс (например, /settimezone Europe/Moscow)
+/setlanguage <lang> - Установить языковые предпочтения (en/ru)
 /status - Проверить, есть ли ожидающие запросы на уточнение
 /cancel - Отменить ожидающее уточнение и начать заново
 /help - Показать это сообщение помощи
