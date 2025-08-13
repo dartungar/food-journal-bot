@@ -6,6 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from services.ai_service import AIFoodAnalyzer
 from services.clarification_service import ClarificationService
+from services.compliment_service import compliment_service
 
 ai_analyzer = AIFoodAnalyzer(os.getenv('OPENAI_API_KEY'))
 clarification_service = ClarificationService()
@@ -49,6 +50,12 @@ async def store_and_respond_analysis(update: Update, analysis, user_id: int, is_
             response += f"💪 Protein: {analysis.total_nutrition.protein:.1f}g\n"
             response += f"🌾 Carbs: {analysis.total_nutrition.carbs:.1f}g\n"
             response += f"🥑 Fat: {analysis.total_nutrition.fat:.1f}g"
+            
+            # Add compliment for healthy food choices
+            compliment = compliment_service.generate_response_with_compliment(analysis.food_items)
+            if compliment:
+                response += f"\n\n{compliment}"
+            
             await update.message.reply_text(response, parse_mode='Markdown')
             logger.info(f"Analysis sent to user {user_id}.")
         else:
@@ -336,6 +343,12 @@ async def store_and_respond_text_analysis(update: Update, analysis, text_descrip
             response += f"💪 Protein: {analysis.total_nutrition.protein:.1f}g\n"
             response += f"🌾 Carbs: {analysis.total_nutrition.carbs:.1f}g\n"
             response += f"🥑 Fat: {analysis.total_nutrition.fat:.1f}g"
+            
+            # Add compliment for healthy food choices
+            compliment = compliment_service.generate_response_with_compliment(analysis.food_items)
+            if compliment:
+                response += f"\n\n{compliment}"
+            
             await update.message.reply_text(response, parse_mode='Markdown')
             logger.info(f"Analysis sent to user {user_id}.")
         else:
@@ -528,6 +541,12 @@ async def store_and_respond_audio_analysis(update: Update, analysis, transcribed
             response += f"💪 Protein: {analysis.total_nutrition.protein:.1f}g\n"
             response += f"🌾 Carbs: {analysis.total_nutrition.carbs:.1f}g\n"
             response += f"🥑 Fat: {analysis.total_nutrition.fat:.1f}g"
+            
+            # Add compliment for healthy food choices
+            compliment = compliment_service.generate_response_with_compliment(analysis.food_items)
+            if compliment:
+                response += f"\n\n{compliment}"
+            
             await update.message.reply_text(response, parse_mode='Markdown')
             logger.info(f"Analysis sent to user {user_id}.")
         else:
