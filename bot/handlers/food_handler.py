@@ -127,7 +127,7 @@ async def handle_food_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     clarification_msg += "\n"
                 
                 clarification_msg += (
-                    "Please send another photo or voice message with clarification "
+                    "Please send another photo, voice message, or text description with clarification "
                     "so I can provide accurate nutrition information!"
                 )
                 
@@ -183,6 +183,167 @@ async def handle_clarification_photo(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         logger.exception(f"Error handling clarification photo for user {user_id}: {e}")
         await update.message.reply_text("❌ An error occurred while processing clarification. Please try again.")
+
+
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text messages describing food for analysis"""
+    user_id = update.effective_user.id
+
+    if not is_user_allowed(user_id):
+        logger.warning(f"Unauthorized access attempt by user {user_id}.")
+        await update.message.reply_text("🚫 You are not authorized to use this bot.")
+        return
+
+    if not update.message.text:
+        logger.warning(f"User {user_id} sent a message without text.")
+        await update.message.reply_text("Please send a text description of your food!")
+        return
+
+    text_description = update.message.text.strip()
+    
+    # Check if user has pending clarification
+    if clarification_service.has_pending_clarification(user_id):
+        await handle_clarification_text(update, context, text_description)
+        return
+
+    logger.info(f"User {user_id} sent text message: {text_description[:100]}...")
+    await update.message.reply_text("📝 Analyzing your food description... This may take a moment.")
+
+    try:
+        # Analyze with AI
+        logger.info(f"Sending text to AI analyzer for user {user_id}.")
+        analysis = await ai_analyzer.analyze_food_text(text_description)
+        logger.info(f"AI analysis result for user {user_id}: {analysis}")
+
+        if analysis:
+            # Check for uncertainty
+            if analysis.uncertainty and analysis.uncertainty.has_uncertainty:
+                # Store pending clarification
+                original_data = {
+                    'text_description': text_description,
+                    'analysis_text': str(analysis)
+                }
+                
+                clarification_service.store_pending_clarification(
+                    user_id=user_id,
+                    original_data=original_data,
+                    analysis_text=str(analysis),
+                    uncertain_items=analysis.uncertainty.uncertain_items,
+                    uncertainty_reasons=analysis.uncertainty.uncertainty_reasons,
+                    media_type='text'
+                )
+                
+                # Ask for clarification
+                clarification_msg = f"📝 **Your description:** \"{text_description}\"\n\n"
+                clarification_msg += "⚠️ I have some uncertainties about your food:\n\n"
+                
+                if analysis.uncertainty.uncertain_items:
+                    clarification_msg += "**Uncertain items:**\n"
+                    for item in analysis.uncertainty.uncertain_items:
+                        clarification_msg += f"• {item}\n"
+                    clarification_msg += "\n"
+                
+                if analysis.uncertainty.uncertainty_reasons:
+                    clarification_msg += "**Reasons for uncertainty:**\n"
+                    for reason in analysis.uncertainty.uncertainty_reasons:
+                        clarification_msg += f"• {reason}\n"
+                    clarification_msg += "\n"
+                
+                clarification_msg += (
+                    "Please send another text message, photo, or voice message with clarification "
+                    "so I can provide accurate nutrition information!"
+                )
+                
+                await update.message.reply_text(clarification_msg, parse_mode='Markdown')
+                logger.info(f"Asked user {user_id} for clarification due to uncertainties in text.")
+                return
+            
+            # No uncertainty - proceed with storage
+            await store_and_respond_text_analysis(update, analysis, text_description, user_id)
+            
+        else:
+            logger.warning(f"AI analysis failed or returned no result for user {user_id}.")
+            await update.message.reply_text("❌ Could not analyze the food description. Please try describing your food in more detail.")
+    except Exception as e:
+        logger.exception(f"Error handling text message for user {user_id}: {e}")
+        await update.message.reply_text("❌ An error occurred while analyzing your food description. Please try again.")
+
+
+async def handle_clarification_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text_description: str):
+    """Handle clarification text from user"""
+    user_id = update.effective_user.id
+    
+    try:
+        pending = clarification_service.get_pending_clarification(user_id)
+        if not pending:
+            await update.message.reply_text("❌ No pending clarification found.")
+            return
+        
+        logger.info(f"Processing clarification text for user {user_id}.")
+        await update.message.reply_text("📝 Processing your clarification... This may take a moment.")
+        
+        # For text clarification, we can use the analyze_food_text method with clarification
+        original_text = pending.original_data.get('text_description', '')
+        analysis = await ai_analyzer.analyze_food_text(
+            text_description=original_text,
+            clarification_text=text_description
+        )
+        
+        if analysis:
+            # Clear pending clarification
+            clarification_service.clear_pending_clarification(user_id)
+            
+            # Store and respond with the original text description
+            original_text = pending.original_data.get('text_description', 'Text clarification provided')
+            await store_and_respond_text_analysis(update, analysis, original_text, user_id, is_clarification=True)
+        else:
+            await update.message.reply_text("❌ Could not process clarification. Please try again.")
+            
+    except Exception as e:
+        logger.exception(f"Error handling clarification text for user {user_id}: {e}")
+        await update.message.reply_text("❌ An error occurred while processing clarification. Please try again.")
+
+
+async def store_and_respond_text_analysis(update: Update, analysis, text_description: str, user_id: int, is_clarification: bool = False):
+    """Helper function to store text analysis in database and send response to user"""
+    try:
+        # Store in SQLite
+        from services.database_service import DatabaseService
+        db_path = os.getenv('DATABASE_PATH', '/app/data/food_journal.db')
+        database_service = DatabaseService(db_path)
+        username = update.effective_user.username or ""
+        first_name = update.effective_user.first_name or ""
+        logger.info(f"Storing analysis in database for user {user_id}.")
+        stored = database_service.store_food_analysis(user_id, username, first_name, analysis)
+
+        if stored:
+            # Format response message with original text
+            if is_clarification:
+                response = f"📝 **Original Description:** \"{text_description}\"\n\n"
+                response += "✅ **Clarification processed! Final Food Analysis:**\n\n"
+            else:
+                response = f"📝 **Your Description:** \"{text_description}\"\n\n"
+                response += "🍽️ **Food Analysis Complete!**\n\n"
+                
+            for item in analysis.food_items:
+                response += f"📍 **{item.name}** ({item.quantity})\n"
+                response += f"   • Calories: {getattr(item.nutrition, 'calories', 0.0):.0f} kcal\n"
+                response += f"   • Protein: {getattr(item.nutrition, 'protein', 0.0):.1f}g\n"
+                response += f"   • Carbs: {getattr(item.nutrition, 'carbs', 0.0):.1f}g\n"
+                response += f"   • Fat: {getattr(item.nutrition, 'fat', 0.0):.1f}g\n\n"
+            response += f"**📊 Total Nutrition:**\n"
+            response += f"🔥 Calories: {analysis.total_nutrition.calories:.0f} kcal\n"
+            response += f"💪 Protein: {analysis.total_nutrition.protein:.1f}g\n"
+            response += f"🌾 Carbs: {analysis.total_nutrition.carbs:.1f}g\n"
+            response += f"🥑 Fat: {analysis.total_nutrition.fat:.1f}g"
+            await update.message.reply_text(response, parse_mode='Markdown')
+            logger.info(f"Analysis sent to user {user_id}.")
+        else:
+            logger.error(f"Failed to store analysis in database for user {user_id}.")
+            await update.message.reply_text("❌ Failed to save food entry. Please try again.")
+    except Exception as e:
+        logger.exception(f"Error storing and responding text analysis for user {user_id}: {e}")
+        await update.message.reply_text("❌ An error occurred while saving your food entry. Please try again.")
 
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -271,7 +432,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     clarification_msg += "\n"
                 
                 clarification_msg += (
-                    "Please send another photo or voice message with clarification "
+                    "Please send another photo, voice message, or text description with clarification "
                     "so I can provide accurate nutrition information!"
                 )
                 
@@ -388,7 +549,7 @@ async def cancel_clarification(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if clarification_service.has_pending_clarification(user_id):
         clarification_service.clear_pending_clarification(user_id)
-        await update.message.reply_text("✅ Clarification request cancelled. You can now send new food photos or audio messages.")
+        await update.message.reply_text("✅ Clarification request cancelled. You can now send new food photos, voice messages, or text descriptions.")
         logger.info(f"User {user_id} cancelled pending clarification.")
     else:
         await update.message.reply_text("ℹ️ No pending clarification to cancel.")
@@ -411,8 +572,8 @@ async def check_clarification_status(update: Update, context: ContextTypes.DEFAU
         status_msg += f"**Time:** {time_diff.seconds // 60} minutes ago\n"
         status_msg += f"**Media Type:** {pending.media_type.title()}\n"
         status_msg += f"**Uncertain Items:** {', '.join(pending.uncertain_items) if pending.uncertain_items else 'None specified'}\n\n"
-        status_msg += "Please send clarification (photo or voice message) or use /cancel to start over."
+        status_msg += "Please send clarification (photo, voice message, or text description) or use /cancel to start over."
         
         await update.message.reply_text(status_msg, parse_mode='Markdown')
     else:
-        await update.message.reply_text("ℹ️ No pending clarification requests. Send a food photo or voice message to get started!")
+        await update.message.reply_text("ℹ️ No pending clarification requests. Send a food photo, voice message, or text description to get started!")
