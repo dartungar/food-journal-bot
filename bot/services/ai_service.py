@@ -37,34 +37,51 @@ class AIFoodAnalyzer:
         return base64.b64encode(image_bytes).decode('utf-8')
     
     async def analyze_food_image(self, image_bytes: bytes, clarification_text: str = None) -> Optional[FoodAnalysisResponse]:
-        import re
         encoded_image = self.encode_image(image_bytes)
         
-        # Modify system prompt based on whether this is initial analysis or clarification
+        # Single-step analysis with structured output
         if clarification_text:
-            system_prompt = (
-                "You are a Nutritionist's assistant. "
-                "You previously analyzed a food image but had some uncertainties. "
-                "The user has now provided clarification. "
-                "Re-analyze the image using the clarification to provide accurate nutrition data. "
-                "Be more confident in your analysis now that you have clarification."
-            )
-            user_message = f"Re-analyze this food image with the following clarification: {clarification_text}"
+            system_prompt = """You are a Nutritionist's assistant that analyzes food images and provides structured nutritional data.
+
+You previously analyzed this image but had some uncertainties. The user has provided clarification.
+Re-analyze the image using the clarification to provide accurate nutrition data.
+
+Rules:
+- Identify all food items in the image and their nutritional information
+- Estimate reasonable quantities and nutritional values based on visual assessment
+- Calculate total_nutrition as the sum of all food items' nutrition
+- Since this is a clarification response, set has_uncertainty to false and confidence_score to 0.9 or higher
+- Use the clarification to resolve any previous uncertainties"""
+            
+            user_message = f"Re-analyze this food image with clarification: {clarification_text}\n\nProvide structured nutritional analysis."
         else:
-            system_prompt = (
-                "You are a Nutritionist's assistant. "
-                "You analyze pictures of food and provide detailed description for Nutritionist, "
-                "so that he can analyze food and provide nutrition data. "
-                "If you're uncertain about food identification, quantities, or nutritional content, "
-                "clearly indicate your uncertainties in your response."
-            )
-            user_message = "Analyze this food image and provide nutritional information."
+            system_prompt = """You are a Nutritionist's assistant that analyzes food images and provides structured nutritional data.
+
+Analyze the food image and extract nutritional information directly into the structured format.
+
+Rules:
+- Identify all food items in the image and estimate their nutritional content
+- Estimate quantities based on visual assessment (e.g., "1 medium apple", "2 slices", "1 cup")
+- If nutritional values cannot be determined from the image, use typical values for those foods
+- Calculate total_nutrition as the sum of all food items' nutrition
+
+Uncertainty Assessment - IMPORTANT:
+- ONLY set has_uncertainty to true for MAJOR unclear situations:
+  * Completely unidentifiable food items in the image
+  * Extremely unclear quantities that cannot be reasonably estimated from visual cues
+  * Severely poor image quality making identification impossible
+- DO NOT set uncertainty for typical estimation scenarios (use reasonable defaults)
+- When in doubt, make your best reasonable estimate and set has_uncertainty to FALSE
+- Set confidence_score between 0.0-1.0 (be generous with confidence for reasonable estimates)"""
+            
+            user_message = "Analyze this food image and provide structured nutritional information."
         
         try:
             import asyncio
             response = await asyncio.to_thread(
-                self.client.chat.completions.create,
+                self.client.beta.chat.completions.parse,
                 model="gpt-5-mini",
+                reasoning_effort="minimal",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {
@@ -83,22 +100,31 @@ class AIFoodAnalyzer:
                         ]
                     }
                 ],
+                response_format=NutritionParseResponse,
                 max_completion_tokens=2048
             )
-            if response.choices and response.choices[0].message and response.choices[0].message.content:
-                text = response.choices[0].message.content
-                print(f"AI response: {text}")
-                # Use OpenAI to parse nutrition info into structured format
-                return await self._parse_nutrition_response(text, is_clarification=bool(clarification_text))
-            else:
+            
+            if not response.choices or not response.choices[0].message:
                 print("No valid response from OpenAI.")
                 return None
+                
+            parsed_data = response.choices[0].message.parsed
+            if not parsed_data:
+                print("No parsed data from structured response")
+                return None
+                
+            print(f"Successfully analyzed image with {len(parsed_data.food_items)} food items")
+            print(f"Uncertainty detected: {parsed_data.uncertainty.has_uncertainty}")
+            
+            # Convert to your existing models
+            return self._convert_to_food_analysis_response(parsed_data)
+            
         except Exception as e:
             print(f"Error analyzing food image: {e}")
             return None
 
     async def analyze_food_audio(self, audio_bytes: bytes, filename: str = "audio.ogg", clarification_text: str = None) -> Optional[Tuple[FoodAnalysisResponse, str]]:
-        """Analyze food audio by transcribing and then analyzing the description"""
+        """Analyze food audio by transcribing and then analyzing the description in a single step"""
         try:
             import asyncio
             
@@ -123,166 +149,61 @@ class AIFoodAnalyzer:
                 print("Empty transcription received.")
                 return None
             
-            # Step 2: Analyze the transcribed text for food and nutrition
+            # Step 2: Single-step analysis with structured output
             if clarification_text:
-                system_prompt = (
-                    "You are a Nutritionist's assistant. "
-                    "You previously analyzed a food description but had some uncertainties. "
-                    "The user has now provided clarification. "
-                    "Re-analyze the food description using the clarification to provide accurate nutrition data. "
-                    "Be more confident in your analysis now that you have clarification."
-                )
-                user_message = f"Original description: {transcribed_text}\n\nClarification: {clarification_text}\n\nProvide accurate nutritional information."
-            else:
-                system_prompt = (
-                    "You are a Nutritionist's assistant. "
-                    "You analyze food descriptions and provide detailed nutritional information. "
-                    "Based on the food description, estimate portions and provide nutrition data including "
-                    "calories, protein, carbs, and fat for each food item mentioned. "
-                    "If you're uncertain about food identification, quantities, or nutritional content, "
-                    "clearly indicate your uncertainties in your response."
-                )
-                user_message = f"Analyze this food description and provide nutritional information: {transcribed_text}"
-            
-            print("Starting food analysis from transcription...")
-            
-            response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model="gpt-5-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                max_completion_tokens=2048
-            )
-            
-            print(f"OpenAI chat completions response: {response}")
-            print(f"Response choices: {response.choices if response.choices else 'None'}")
-            if response.choices and response.choices[0].message:
-                print(f"Message content: '{response.choices[0].message.content}'")
-                print(f"Message content type: {type(response.choices[0].message.content)}")
-            
-            if response.choices and response.choices[0].message and response.choices[0].message.content:
-                text = response.choices[0].message.content
-                print(f"AI food analysis response: {text}")
-                
-                # Parse the nutrition response using OpenAI
-                analysis = await self._parse_nutrition_response(text, is_clarification=bool(clarification_text))
-                if analysis:
-                    # Return both the analysis and the transcribed text
-                    return (analysis, transcribed_text)
-                else:
-                    print("Failed to parse nutrition response.")
-                    return None
-            elif response.choices and response.choices[0].message and response.choices[0].message.content == '':
-                print("Empty response content from OpenAI - likely due to token limit. Retrying with simpler prompt...")
-                
-                # Retry with a simpler, more direct prompt
-                simple_prompt = (
-                    "Analyze this food description and provide a simple nutritional breakdown. "
-                    "List each food item with estimated calories, protein, carbs, and fat. "
-                    "Be concise and direct."
-                )
-                
-                retry_response = await asyncio.to_thread(
-                    self.client.chat.completions.create,
-                    model="gpt-4o-mini",  # Use a simpler model for retry
-                    messages=[
-                        {"role": "system", "content": simple_prompt},
-                        {"role": "user", "content": f"Analyze this food: {transcribed_text}"}
-                    ],
-                    max_completion_tokens=1024
-                )
-                
-                if retry_response.choices and retry_response.choices[0].message and retry_response.choices[0].message.content:
-                    text = retry_response.choices[0].message.content
-                    print(f"Retry AI food analysis response: {text}")
-                    
-                    # Parse the nutrition response using OpenAI
-                    analysis = await self._parse_nutrition_response(text, is_clarification=bool(clarification_text))
-                    if analysis:
-                        return (analysis, transcribed_text)
-                    else:
-                        print("Failed to parse retry nutrition response.")
-                        return None
-                else:
-                    print("Retry also failed to produce valid content.")
-                    return None
-            else:
-                print("No valid response from OpenAI for food analysis.")
-                return None
-                
-        except Exception as e:
-            print(f"Error analyzing food audio: {e}")
-            return None
+                system_prompt = """You are a Nutritionist's assistant that analyzes food descriptions and provides structured nutritional data.
 
-    async def _parse_nutrition_response(self, text: str, is_clarification: bool = False) -> Optional[FoodAnalysisResponse]:
-        """Convert unstructured nutrition text to structured data using OpenAI"""
-        from models.nutrition_models import FoodItem, NutritionInfo
-        
-        try:
-            import asyncio
-            
-            # Adjust system prompt based on whether this is a clarification
-            if is_clarification:
-                system_prompt = """Extract nutritional information from the food analysis text.
+You previously analyzed a food description but had some uncertainties. The user has provided clarification.
+Re-analyze using both the original description and clarification to provide accurate nutrition data.
 
 Rules:
 - Identify all food items mentioned and their nutritional information
-- If nutritional values are not specified, estimate reasonable values based on typical food content
-- Quantities should be descriptive (e.g., "1 medium apple", "2 slices", "1 cup")  
+- Estimate reasonable quantities and nutritional values based on the description
 - Calculate total_nutrition as the sum of all food items' nutrition
-- If no food is identified, return empty food_items array with zero totals
-- Since this is a clarification response, set has_uncertainty to false and confidence_score to 0.9 or higher"""
+- Since this is a clarification response, set has_uncertainty to false and confidence_score to 0.9 or higher
+- Use the clarification to resolve any previous uncertainties"""
+                
+                user_message = f"Original description: {transcribed_text}\n\nClarification: {clarification_text}\n\nProvide structured nutritional analysis."
             else:
-                system_prompt = """Extract nutritional information from the food analysis text and assess uncertainty.
+                system_prompt = """You are a Nutritionist's assistant that analyzes food descriptions and provides structured nutritional data.
+
+Analyze the food description and extract nutritional information directly into the structured format.
 
 Rules:
-- Identify all food items mentioned and their nutritional information
-- If nutritional values are not specified, estimate reasonable values based on typical food content
-- Quantities should be descriptive (e.g., "1 medium apple", "2 slices", "1 cup")  
+- Identify all food items mentioned and estimate their nutritional content
+- Estimate quantities based on the description (e.g., "1 medium apple", "2 slices", "1 cup")
+- If specific nutritional values aren't mentioned, use typical values for those foods
 - Calculate total_nutrition as the sum of all food items' nutrition
-- If no food is identified, return empty food_items array with zero totals
 
 Uncertainty Assessment - IMPORTANT:
 - ONLY set has_uncertainty to true for MAJOR unclear situations:
   * Completely unidentifiable food items (cannot guess what it is at all)
   * Extremely vague quantities that cannot be reasonably estimated
   * Multiple conflicting interpretations where you genuinely cannot choose
-  * Severely poor image/audio quality making identification impossible
-
-- DO NOT set has_uncertainty for these common situations:
-  * Brand variations (use generic/average values)
-  * Recipe variations (use typical/standard recipes)
-  * Preparation method variations (choose most common)
-  * Minor ingredient variations (estimate based on standard versions)
-  * Typical food quality variations (use average nutritional values)
-
+- DO NOT set uncertainty for typical estimation scenarios (use reasonable defaults)
 - When in doubt, make your best reasonable estimate and set has_uncertainty to FALSE
-- Use generic product nutritional values when brand is unknown
-- Only ask for clarification when you genuinely cannot make any reasonable guess
-- List specific uncertain_items (only truly unclear food names)
-- Provide uncertainty_reasons (only for major unclear situations)
-- Set confidence_score between 0.0-1.0 (be generous with confidence for reasonable estimates)
-- For most situations with identifiable food, set has_uncertainty to false, empty arrays, confidence_score 0.8+"""
-
-            print("Requesting structured nutrition data from OpenAI...")
-            print(f"Input text for parsing: {text[:200]}...")
+- Set confidence_score between 0.0-1.0 (be generous with confidence for reasonable estimates)"""
+                
+                user_message = f"Analyze this food description and provide structured nutritional information: {transcribed_text}"
+            
+            print("Starting single-step food analysis from transcription...")
             
             response = await asyncio.to_thread(
                 self.client.beta.chat.completions.parse,
-                model="gpt-5",
+                model="gpt-5-mini",
+                reasoning_effort="minimal",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Parse this nutrition analysis:\n\n{text}"}
+                    {"role": "user", "content": user_message}
                 ],
-                response_format=NutritionParseResponse
+                response_format=NutritionParseResponse,
+                max_completion_tokens=2048
             )
             
-            print(f"OpenAI structured parsing response: {response}")
+            print(f"OpenAI structured response: {response}")
             
             if not response.choices or not response.choices[0].message:
-                print("No valid response from structured parsing")
+                print("No valid response from OpenAI for food analysis.")
                 return None
                 
             parsed_data = response.choices[0].message.parsed
@@ -290,58 +211,139 @@ Uncertainty Assessment - IMPORTANT:
                 print("No parsed data from structured response")
                 return None
                 
-            print(f"Successfully parsed {len(parsed_data.food_items)} food items")
+            print(f"Successfully analyzed audio with {len(parsed_data.food_items)} food items")
+            print(f"Uncertainty detected: {parsed_data.uncertainty.has_uncertainty}")
+            
+            # Convert to your existing models and return with transcribed text
+            analysis = self._convert_to_food_analysis_response(parsed_data)
+            if analysis:
+                return (analysis, transcribed_text)
+            else:
+                print("Failed to convert parsed data to analysis response.")
+                return None
+                
+        except Exception as e:
+            print(f"Error analyzing food audio: {e}")
+            return None
+
+    async def analyze_food_text(self, text_description: str, clarification_text: str = None) -> Optional[FoodAnalysisResponse]:
+        """Analyze food from text description using single-step structured output"""
+        try:
+            import asyncio
+            
+            if clarification_text:
+                system_prompt = """You are a Nutritionist's assistant that analyzes food descriptions and provides structured nutritional data.
+
+You previously analyzed a food description but had some uncertainties. The user has provided clarification.
+Re-analyze using both the original description and clarification to provide accurate nutrition data.
+
+Rules:
+- Identify all food items mentioned and their nutritional information
+- Estimate reasonable quantities and nutritional values based on the description
+- Calculate total_nutrition as the sum of all food items' nutrition
+- Since this is a clarification response, set has_uncertainty to false and confidence_score to 0.9 or higher
+- Use the clarification to resolve any previous uncertainties"""
+                
+                user_message = f"Original description: {text_description}\n\nClarification: {clarification_text}\n\nProvide structured nutritional analysis."
+            else:
+                system_prompt = """You are a Nutritionist's assistant that analyzes food descriptions and provides structured nutritional data.
+
+Analyze the food description and extract nutritional information directly into the structured format.
+
+Rules:
+- Identify all food items mentioned and estimate their nutritional content
+- Estimate quantities based on the description (e.g., "1 medium apple", "2 slices", "1 cup")
+- If specific nutritional values aren't mentioned, use typical values for those foods
+- Calculate total_nutrition as the sum of all food items' nutrition
+
+Uncertainty Assessment - IMPORTANT:
+- ONLY set has_uncertainty to true for MAJOR unclear situations:
+  * Completely unidentifiable food items (cannot guess what it is at all)
+  * Extremely vague quantities that cannot be reasonably estimated
+  * Multiple conflicting interpretations where you genuinely cannot choose
+- DO NOT set uncertainty for typical estimation scenarios (use reasonable defaults)
+- When in doubt, make your best reasonable estimate and set has_uncertainty to FALSE
+- Set confidence_score between 0.0-1.0 (be generous with confidence for reasonable estimates)"""
+                
+                user_message = f"Analyze this food description and provide structured nutritional information: {text_description}"
+            
+            print("Starting single-step food analysis from text description...")
+            
+            response = await asyncio.to_thread(
+                self.client.beta.chat.completions.parse,
+                model="gpt-5-mini",
+                reasoning_effort="minimal",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                response_format=NutritionParseResponse,
+                max_completion_tokens=2048
+            )
+            
+            if not response.choices or not response.choices[0].message:
+                print("No valid response from OpenAI for text analysis.")
+                return None
+                
+            parsed_data = response.choices[0].message.parsed
+            if not parsed_data:
+                print("No parsed data from structured response")
+                return None
+                
+            print(f"Successfully analyzed text with {len(parsed_data.food_items)} food items")
             print(f"Uncertainty detected: {parsed_data.uncertainty.has_uncertainty}")
             
             # Convert to your existing models
-            food_items = []
-            for item_data in parsed_data.food_items:
-                nutrition = NutritionInfo(
-                    calories=item_data.nutrition.calories,
-                    protein=item_data.nutrition.protein,
-                    carbs=item_data.nutrition.carbs,
-                    fat=item_data.nutrition.fat
-                )
-                
-                food_item = FoodItem(
-                    name=item_data.name,
-                    quantity=item_data.quantity,
-                    nutrition=nutrition
-                )
-                food_items.append(food_item)
+            return self._convert_to_food_analysis_response(parsed_data)
             
-            # Create total nutrition
-            total_nutrition = NutritionInfo(
-                calories=parsed_data.total_nutrition.calories,
-                protein=parsed_data.total_nutrition.protein,
-                carbs=parsed_data.total_nutrition.carbs,
-                fat=parsed_data.total_nutrition.fat
-            )
-            
-            # Create uncertainty info
-            uncertainty = UncertaintyInfo(
-                has_uncertainty=parsed_data.uncertainty.has_uncertainty,
-                uncertain_items=parsed_data.uncertainty.uncertain_items,
-                uncertainty_reasons=parsed_data.uncertainty.uncertainty_reasons,
-                confidence_score=parsed_data.uncertainty.confidence_score
-            )
-            
-            # Create and return FoodAnalysisResponse
-            analysis = FoodAnalysisResponse(
-                food_items=food_items,
-                total_nutrition=total_nutrition,
-                analysis_timestamp=datetime.now(),
-                uncertainty=uncertainty
-            )
-            
-            return analysis
-                
         except Exception as e:
-            print(f"Error parsing nutrition response: {e}")
-            print(f"Exception type: {type(e)}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
+            print(f"Error analyzing food text: {e}")
             return None
+
+    def _convert_to_food_analysis_response(self, parsed_data: NutritionParseResponse) -> FoodAnalysisResponse:
+        """Convert parsed nutrition data to FoodAnalysisResponse"""
+        from models.nutrition_models import FoodItem, NutritionInfo
+        
+        # Convert to your existing models
+        food_items = []
+        for item_data in parsed_data.food_items:
+            nutrition = NutritionInfo(
+                calories=item_data.nutrition.calories,
+                protein=item_data.nutrition.protein,
+                carbs=item_data.nutrition.carbs,
+                fat=item_data.nutrition.fat
+            )
+            
+            food_item = FoodItem(
+                name=item_data.name,
+                quantity=item_data.quantity,
+                nutrition=nutrition
+            )
+            food_items.append(food_item)
+        
+        # Create total nutrition
+        total_nutrition = NutritionInfo(
+            calories=parsed_data.total_nutrition.calories,
+            protein=parsed_data.total_nutrition.protein,
+            carbs=parsed_data.total_nutrition.carbs,
+            fat=parsed_data.total_nutrition.fat
+        )
+        
+        # Create uncertainty info
+        uncertainty = UncertaintyInfo(
+            has_uncertainty=parsed_data.uncertainty.has_uncertainty,
+            uncertain_items=parsed_data.uncertainty.uncertain_items,
+            uncertainty_reasons=parsed_data.uncertainty.uncertainty_reasons,
+            confidence_score=parsed_data.uncertainty.confidence_score
+        )
+        
+        # Create and return FoodAnalysisResponse
+        return FoodAnalysisResponse(
+            food_items=food_items,
+            total_nutrition=total_nutrition,
+            analysis_timestamp=datetime.now(),
+            uncertainty=uncertainty
+        )
 
     async def analyze_with_clarification(self, 
                                        original_analysis_text: str,
@@ -349,7 +351,7 @@ Uncertainty Assessment - IMPORTANT:
                                        clarification_type: str,
                                        filename: str = None) -> Optional[FoodAnalysisResponse]:
         """
-        Combine original analysis with clarification to create final analysis
+        Combine original analysis with clarification to create final analysis using single-step structured output
         
         Args:
             original_analysis_text: The original AI analysis text
@@ -361,18 +363,23 @@ Uncertainty Assessment - IMPORTANT:
             clarification_text = ""
             
             if clarification_type == 'photo':
-                # Analyze clarification image
+                # Get clarification from image using structured approach
                 encoded_image = self.encode_image(clarification_data)
-                system_prompt = (
-                    "You are helping to clarify a previous food analysis. "
-                    "Analyze this clarification image and describe what you see. "
-                    "Focus on identifying specific foods and quantities that might help clarify the original analysis."
-                )
+                system_prompt = """You are helping to clarify a previous food analysis. 
+                
+Analyze this clarification image and provide structured nutritional data that resolves uncertainties from the original analysis.
+
+Rules:
+- Focus on identifying specific foods and quantities visible in the image
+- Provide structured output with food items and nutrition data
+- Set has_uncertainty to false since this is clarification
+- Set confidence_score to 0.9 or higher"""
                 
                 import asyncio
                 response = await asyncio.to_thread(
-                    self.client.chat.completions.create,
+                    self.client.beta.chat.completions.parse,
                     model="gpt-5-mini",
+                    reasoning_effort="minimal",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {
@@ -380,7 +387,7 @@ Uncertainty Assessment - IMPORTANT:
                             "content": [
                                 {
                                     "type": "text",
-                                    "text": "Please describe this clarification image in detail:"
+                                    "text": f"Original analysis: {original_analysis_text}\n\nPlease analyze this clarification image and provide structured nutritional data:"
                                 },
                                 {
                                     "type": "image_url",
@@ -391,14 +398,17 @@ Uncertainty Assessment - IMPORTANT:
                             ]
                         }
                     ],
-                    max_completion_tokens=512
+                    response_format=NutritionParseResponse,
+                    max_completion_tokens=1024
                 )
                 
                 if response.choices and response.choices[0].message:
-                    clarification_text = response.choices[0].message.content
+                    parsed_data = response.choices[0].message.parsed
+                    if parsed_data:
+                        return self._convert_to_food_analysis_response(parsed_data)
                 
             elif clarification_type == 'audio':
-                # Transcribe clarification audio
+                # Transcribe clarification audio then analyze with structured output
                 import asyncio
                 import io
                 
@@ -413,48 +423,48 @@ Uncertainty Assessment - IMPORTANT:
                 )
                 
                 clarification_text = transcription.text
-            
-            if not clarification_text.strip():
-                print("No clarification text obtained")
-                return None
-            
-            # Now combine original analysis with clarification
-            system_prompt = (
-                "You are a Nutritionist's assistant. "
-                "You have an original food analysis and now received clarification from the user. "
-                "Create a final, accurate nutritional analysis combining both pieces of information. "
-                "Use the clarification to resolve any uncertainties from the original analysis."
-            )
-            
-            combined_prompt = f"""
+                
+                if clarification_text.strip():
+                    # Single-step structured analysis with clarification
+                    system_prompt = """You are a Nutritionist's assistant that provides structured nutritional data.
+
+You have an original food analysis and clarification from the user. Provide final structured nutritional analysis.
+
+Rules:
+- Combine original analysis with user clarification
+- Resolve any uncertainties using the clarification
+- Set has_uncertainty to false since this is clarification
+- Set confidence_score to 0.9 or higher"""
+                    
+                    combined_prompt = f"""
 Original Analysis:
 {original_analysis_text}
 
 User Clarification:
 {clarification_text}
 
-Please provide a final, accurate nutritional analysis that combines this information and resolves any uncertainties.
+Provide final structured nutritional analysis combining this information.
 """
+                    
+                    response = await asyncio.to_thread(
+                        self.client.beta.chat.completions.parse,
+                        model="gpt-5-mini",
+                        reasoning_effort="minimal",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": combined_prompt}
+                        ],
+                        response_format=NutritionParseResponse,
+                        max_completion_tokens=1024
+                    )
+                    
+                    if response.choices and response.choices[0].message:
+                        parsed_data = response.choices[0].message.parsed
+                        if parsed_data:
+                            return self._convert_to_food_analysis_response(parsed_data)
             
-            response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model="gpt-5-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": combined_prompt}
-                ],
-                max_completion_tokens=1024
-            )
-            
-            if response.choices and response.choices[0].message and response.choices[0].message.content:
-                final_analysis_text = response.choices[0].message.content
-                print(f"Final combined analysis: {final_analysis_text}")
-                
-                # Parse the final analysis (mark as clarification so uncertainty is low)
-                return await self._parse_nutrition_response(final_analysis_text, is_clarification=True)
-            else:
-                print("No valid response for combined analysis")
-                return None
+            print("Failed to obtain valid clarification analysis")
+            return None
                 
         except Exception as e:
             print(f"Error in analyze_with_clarification: {e}")
