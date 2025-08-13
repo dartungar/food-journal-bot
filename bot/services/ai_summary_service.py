@@ -25,22 +25,38 @@ class AISummaryService:
         self.client = OpenAI(api_key=openai_api_key)
         self.database_service = database_service
     
-    async def generate_daily_summary(self, telegram_user_id: int, date_str: str) -> Optional[DailyInsight]:
-        """Generate AI-powered daily nutrition summary"""
-        try:
-            # Get user's food data for the day
-            daily_entries = await self._get_daily_nutrition_data(telegram_user_id, date_str)
-            
-            if not daily_entries:
-                return None
-            
-            # Get recent context (last 7 days for comparison)
-            context_data = await self._get_recent_context(telegram_user_id, date_str, days=7)
-            
-            # Prepare data for AI analysis
-            nutrition_data = self._format_daily_data_for_ai(daily_entries, context_data, date_str)
-            
-            system_prompt = """You are a professional nutritionist and health coach. Analyze the user's daily nutrition data and provide personalized insights.
+    def _get_daily_system_prompt(self, language: str) -> str:
+        """Get system prompt for daily summary in specified language"""
+        if language == 'ru':
+            return """Ты профессиональный диетолог и консультант по здоровому питанию. Проанализируй дневные данные о питании пользователя и предоставь персонализированные рекомендации.
+
+Сосредоточься на:
+1. Общем балансе питания и качестве
+2. Адекватности калорий
+3. Распределении макронутриентов
+4. Времени приема пищи и частоте
+5. Прогрессе по сравнению с предыдущими днями
+6. Конкретных выборах продуктов и их питательной ценности
+
+Будь ободряющим, конкретным и практичным. Избегай медицинских советов. Поддерживай дружелюбный и мотивирующий тон.
+
+ВАЖНО: Делай ответы очень краткими. Каждое поле должно быть кратким:
+- summary: максимум 1-2 предложения
+- key_observations: максимум 2-3 коротких пункта
+- nutrition_highlights: максимум 2-3 коротких пункта
+- recommendations: максимум 2-3 коротких пункта
+- motivational_message: максимум 1 предложение
+
+Ответь в формате JSON:
+{
+  "summary": "Краткое общее резюме дневного питания (1-2 предложения)",
+  "key_observations": ["короткое наблюдение 1", "короткое наблюдение 2"],
+  "nutrition_highlights": ["короткий акцент 1", "короткий акцент 2"],
+  "recommendations": ["короткая рекомендация 1", "короткая рекомендация 2"],
+  "motivational_message": "Короткое ободряющее сообщение"
+}"""
+        else:  # Default to English
+            return """You are a professional nutritionist and health coach. Analyze the user's daily nutrition data and provide personalized insights.
 
 Focus on:
 1. Overall nutritional balance and quality
@@ -50,59 +66,56 @@ Focus on:
 5. Progress compared to recent days
 6. Specific food choices and their nutritional value
 
-Be encouraging, specific, and actionable. Avoid medical advice. Keep tone friendly and motivational."""
+Be encouraging, specific, and actionable. Avoid medical advice. Keep tone friendly and motivational.
 
-            user_prompt = f"""Analyze today's nutrition data and provide insights:
+IMPORTANT: Keep responses very concise. Each field should be brief:
+- summary: 1-2 sentences max
+- key_observations: 2-3 short bullet points max
+- nutrition_highlights: 2-3 short bullet points max  
+- recommendations: 2-3 short bullet points max
+- motivational_message: 1 sentence max
 
-{nutrition_data}
-
-Please provide a comprehensive daily summary with specific observations about food choices, nutritional balance, and actionable recommendations for tomorrow."""
-
-            response = await self.client.beta.chat.completions.parse(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                model="gpt-4o-mini",
-                response_format=DailyInsight,
-                temperature=0.7
-            )
-            
-            if response.choices[0].message.parsed:
-                return response.choices[0].message.parsed
-            return None
-            
-        except Exception as e:
-            print(f"Error generating daily AI summary: {e}")
-            return None
+Please respond with a JSON object containing:
+{
+  "summary": "Brief overall summary of the day's nutrition (1-2 sentences)",
+  "key_observations": ["short observation 1", "short observation 2"],
+  "nutrition_highlights": ["short highlight 1", "short highlight 2"],
+  "recommendations": ["short recommendation 1", "short recommendation 2"],
+  "motivational_message": "Short encouraging message"
+}"""
     
-    async def generate_weekly_summary(self, telegram_user_id: int) -> Optional[WeeklyInsight]:
-        """Generate AI-powered weekly nutrition analysis"""
-        try:
-            # Get user's food data for the past week
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=7)
-            
-            weekly_data = await self.database_service.get_weekly_data(
-                telegram_user_id, 
-                start_date.strftime('%Y-%m-%d'),
-                end_date.strftime('%Y-%m-%d')
-            )
-            
-            if not weekly_data:
-                return None
-            
-            # Get previous week for comparison
-            prev_week_data = await self.database_service.get_weekly_data(
-                telegram_user_id,
-                (start_date - timedelta(days=7)).strftime('%Y-%m-%d'),
-                start_date.strftime('%Y-%m-%d')
-            )
-            
-            # Format data for AI analysis
-            nutrition_analysis = self._format_weekly_data_for_ai(weekly_data, prev_week_data)
-            
-            system_prompt = """You are an expert nutritionist analyzing a week of eating patterns. Provide comprehensive insights about:
+    def _get_weekly_system_prompt(self, language: str) -> str:
+        """Get system prompt for weekly summary in specified language"""
+        if language == 'ru':
+            return """Ты эксперт-диетолог, анализирующий недельные паттерны питания. Предоставь комплексные insights о:
+
+1. Недельных трендах и паттернах питания
+2. Последовательности в привычках питания
+3. Балансе макронутриентов во времени
+4. Разнообразии и качестве продуктов
+5. Прогрессе по сравнению с предыдущей неделей
+6. Конкретных достижениях и областях для улучшения
+7. Персонализированных целях на следующую неделю
+
+Будь проницательным, ободряющим и предоставляй практичные рекомендации. Сосредоточься на устойчивых привычках и позитивном подкреплении.
+
+ВАЖНО: Делай ответы очень краткими. Каждое поле должно быть кратким:
+- summary: максимум 1-2 предложения
+- Каждое поле массива: максимум 2-3 коротких пункта
+- Каждый пункт: максимум 1 предложение
+
+Ответь в формате JSON:
+{
+  "summary": "Краткое недельное резюме (1-2 предложения)",
+  "trends_analysis": ["короткий тренд 1", "короткий тренд 2"],
+  "nutrition_patterns": ["короткий паттерн 1", "короткий паттерн 2"],
+  "achievements": ["короткое достижение 1", "короткое достижение 2"],
+  "areas_for_improvement": ["короткая область 1", "короткая область 2"],
+  "personalized_recommendations": ["короткая рек. 1", "короткая рек. 2"],
+  "next_week_goals": ["короткая цель 1", "короткая цель 2"]
+}"""
+        else:  # Default to English
+            return """You are an expert nutritionist analyzing a week of eating patterns. Provide comprehensive insights about:
 
 1. Weekly nutrition trends and patterns
 2. Consistency in eating habits
@@ -112,26 +125,159 @@ Please provide a comprehensive daily summary with specific observations about fo
 6. Specific achievements and improvements needed
 7. Personalized goals for next week
 
-Be insightful, encouraging, and provide actionable recommendations. Focus on sustainable habits and positive reinforcement."""
+Be insightful, encouraging, and provide actionable recommendations. Focus on sustainable habits and positive reinforcement.
 
-            user_prompt = f"""Analyze this week's nutrition data and provide comprehensive insights:
+IMPORTANT: Keep responses very concise. Each field should be brief:
+- summary: 1-2 sentences max
+- Each array field: 2-3 short bullet points max
+- Each bullet point: 1 sentence max
 
-{nutrition_analysis}
+Please respond with a JSON object containing:
+{
+  "summary": "Brief weekly summary (1-2 sentences)",
+  "trends_analysis": ["short trend 1", "short trend 2"],
+  "nutrition_patterns": ["short pattern 1", "short pattern 2"],
+  "achievements": ["short achievement 1", "short achievement 2"],
+  "areas_for_improvement": ["short area 1", "short area 2"],
+  "personalized_recommendations": ["short rec 1", "short rec 2"],
+  "next_week_goals": ["short goal 1", "short goal 2"]
+}"""
+    
+    async def generate_daily_summary(self, telegram_user_id: int, date_str: str, language: str = 'en') -> Optional[DailyInsight]:
+        """Generate AI-powered daily nutrition summary"""
+        try:
+            # Get user's food data for the day
+            daily_entries = self._get_daily_nutrition_data(telegram_user_id, date_str)
+            
+            if not daily_entries:
+                return None
+            
+            # Get recent context (last 7 days for comparison)
+            context_data = self._get_recent_context(telegram_user_id, date_str, days=7)
+            
+            # Prepare data for AI analysis
+            nutrition_data = self._format_daily_data_for_ai(daily_entries, context_data, date_str)
+            
+            system_prompt = self._get_daily_system_prompt(language)
 
-Provide detailed weekly analysis with trends, achievements, areas for improvement, and specific goals for next week."""
+            user_prompt_text = "Analyze today's nutrition data and provide insights:" if language == 'en' else "Проанализируй сегодняшние данные о питании и предоставь insights:"
+            concise_instruction = "Please provide a CONCISE daily summary. Keep all responses short and focused - aim for 1-2 sentences per section maximum." if language == 'en' else "Предоставь КРАТКИЙ дневной отчет. Держи все ответы короткими и сфокусированными - стремись к максимум 1-2 предложениям на секцию."
+            
+            user_prompt = f"""{user_prompt_text}
 
-            response = await self.client.beta.chat.completions.parse(
+{nutrition_data}
+
+{concise_instruction}"""
+
+            response = self.client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="gpt-4o-mini",
-                response_format=WeeklyInsight,
-                temperature=0.7
+                model="gpt-5-mini",
+                max_completion_tokens=2048,
+                reasoning_effort="minimal"
             )
             
-            if response.choices[0].message.parsed:
-                return response.choices[0].message.parsed
+            if response.choices[0].message.content:
+                # Parse the response manually since we're not using structured output
+                content = response.choices[0].message.content
+                try:
+                    import json
+                    parsed_data = json.loads(content)
+                    return DailyInsight(
+                        summary=parsed_data.get('summary', ''),
+                        key_observations=parsed_data.get('key_observations', []),
+                        nutrition_highlights=parsed_data.get('nutrition_highlights', []),
+                        recommendations=parsed_data.get('recommendations', []),
+                        motivational_message=parsed_data.get('motivational_message', '')
+                    )
+                except (json.JSONDecodeError, KeyError):
+                    # Fallback: create a simple summary from the content
+                    return DailyInsight(
+                        summary=content,
+                        key_observations=[],
+                        nutrition_highlights=[],
+                        recommendations=[],
+                        motivational_message="Keep up the great work with your nutrition tracking!"
+                    )
+            return None
+            
+        except Exception as e:
+            print(f"Error generating daily AI summary: {e}")
+            return None
+    
+    async def generate_weekly_summary(self, telegram_user_id: int, language: str = 'en') -> Optional[WeeklyInsight]:
+        """Generate AI-powered weekly nutrition analysis"""
+        try:
+            # Get user's food data for the past week
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=7)
+            
+            weekly_data = self.database_service.get_weekly_data(
+                telegram_user_id, 
+                start_date.strftime('%Y-%m-%d'),
+                end_date.strftime('%Y-%m-%d')
+            )
+            
+            if not weekly_data:
+                return None
+            
+            # Get previous week for comparison
+            prev_week_data = self.database_service.get_weekly_data(
+                telegram_user_id,
+                (start_date - timedelta(days=7)).strftime('%Y-%m-%d'),
+                start_date.strftime('%Y-%m-%d')
+            )
+            
+            # Format data for AI analysis
+            nutrition_analysis = self._format_weekly_data_for_ai(weekly_data, prev_week_data)
+            
+            system_prompt = self._get_weekly_system_prompt(language)
+
+            user_prompt_text = "Analyze this week's nutrition data and provide insights:" if language == 'en' else "Проанализируй данные о питании за эту неделю и предоставь insights:"
+            concise_instruction = "Please provide a CONCISE weekly analysis. Keep all responses short and focused - aim for 1-2 sentences per bullet point maximum." if language == 'en' else "Предоставь КРАТКИЙ недельный анализ. Держи все ответы короткими и сфокусированными - стремись к максимум 1-2 предложениям на пункт."
+            
+            user_prompt = f"""{user_prompt_text}
+
+{nutrition_analysis}
+
+{concise_instruction}"""
+
+            response = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                model="gpt-5-mini"
+            )
+            
+            if response.choices[0].message.content:
+                # Parse the response manually since we're not using structured output
+                content = response.choices[0].message.content
+                try:
+                    import json
+                    parsed_data = json.loads(content)
+                    return WeeklyInsight(
+                        summary=parsed_data.get('summary', ''),
+                        trends_analysis=parsed_data.get('trends_analysis', []),
+                        nutrition_patterns=parsed_data.get('nutrition_patterns', []),
+                        achievements=parsed_data.get('achievements', []),
+                        areas_for_improvement=parsed_data.get('areas_for_improvement', []),
+                        personalized_recommendations=parsed_data.get('personalized_recommendations', []),
+                        next_week_goals=parsed_data.get('next_week_goals', [])
+                    )
+                except (json.JSONDecodeError, KeyError):
+                    # Fallback: create a simple summary from the content
+                    return WeeklyInsight(
+                        summary=content,
+                        trends_analysis=[],
+                        nutrition_patterns=[],
+                        achievements=[],
+                        areas_for_improvement=[],
+                        personalized_recommendations=[],
+                        next_week_goals=[]
+                    )
             return None
             
         except Exception as e:
