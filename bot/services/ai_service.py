@@ -83,7 +83,7 @@ class AIFoodAnalyzer:
                         ]
                     }
                 ],
-                max_completion_tokens=1024
+                max_completion_tokens=2048
             )
             if response.choices and response.choices[0].message and response.choices[0].message.content:
                 text = response.choices[0].message.content
@@ -153,8 +153,14 @@ class AIFoodAnalyzer:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                max_completion_tokens=1024
+                max_completion_tokens=2048
             )
+            
+            print(f"OpenAI chat completions response: {response}")
+            print(f"Response choices: {response.choices if response.choices else 'None'}")
+            if response.choices and response.choices[0].message:
+                print(f"Message content: '{response.choices[0].message.content}'")
+                print(f"Message content type: {type(response.choices[0].message.content)}")
             
             if response.choices and response.choices[0].message and response.choices[0].message.content:
                 text = response.choices[0].message.content
@@ -167,6 +173,40 @@ class AIFoodAnalyzer:
                     return (analysis, transcribed_text)
                 else:
                     print("Failed to parse nutrition response.")
+                    return None
+            elif response.choices and response.choices[0].message and response.choices[0].message.content == '':
+                print("Empty response content from OpenAI - likely due to token limit. Retrying with simpler prompt...")
+                
+                # Retry with a simpler, more direct prompt
+                simple_prompt = (
+                    "Analyze this food description and provide a simple nutritional breakdown. "
+                    "List each food item with estimated calories, protein, carbs, and fat. "
+                    "Be concise and direct."
+                )
+                
+                retry_response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
+                    model="gpt-4o-mini",  # Use a simpler model for retry
+                    messages=[
+                        {"role": "system", "content": simple_prompt},
+                        {"role": "user", "content": f"Analyze this food: {transcribed_text}"}
+                    ],
+                    max_completion_tokens=1024
+                )
+                
+                if retry_response.choices and retry_response.choices[0].message and retry_response.choices[0].message.content:
+                    text = retry_response.choices[0].message.content
+                    print(f"Retry AI food analysis response: {text}")
+                    
+                    # Parse the nutrition response using OpenAI
+                    analysis = await self._parse_nutrition_response(text, is_clarification=bool(clarification_text))
+                    if analysis:
+                        return (analysis, transcribed_text)
+                    else:
+                        print("Failed to parse retry nutrition response.")
+                        return None
+                else:
+                    print("Retry also failed to produce valid content.")
                     return None
             else:
                 print("No valid response from OpenAI for food analysis.")
@@ -204,19 +244,30 @@ Rules:
 - Calculate total_nutrition as the sum of all food items' nutrition
 - If no food is identified, return empty food_items array with zero totals
 
-Uncertainty Assessment:
-- Set has_uncertainty to true if you notice any of the following (but do not be too strict):
-  * Totally unclear food identification (if you're unable to guess food item)
-  * Vague quantities ("a bit of", "some", "small portion")
-  * Multiple possible interpretations (if both options seem plausible)
-  * Poor image quality or unclear audio mentioned
-- Do not ask about brand, try to take some "generic" product if unclear
-- List specific uncertain_items (food names that are unclear)
-- Provide uncertainty_reasons (specific reasons for uncertainty)
-- Set confidence_score between 0.0-1.0 (lower for more uncertainty)
-- If confident about everything, set has_uncertainty to false, empty arrays, confidence_score 0.8+"""
+Uncertainty Assessment - IMPORTANT:
+- ONLY set has_uncertainty to true for MAJOR unclear situations:
+  * Completely unidentifiable food items (cannot guess what it is at all)
+  * Extremely vague quantities that cannot be reasonably estimated
+  * Multiple conflicting interpretations where you genuinely cannot choose
+  * Severely poor image/audio quality making identification impossible
+
+- DO NOT set has_uncertainty for these common situations:
+  * Brand variations (use generic/average values)
+  * Recipe variations (use typical/standard recipes)
+  * Preparation method variations (choose most common)
+  * Minor ingredient variations (estimate based on standard versions)
+  * Typical food quality variations (use average nutritional values)
+
+- When in doubt, make your best reasonable estimate and set has_uncertainty to FALSE
+- Use generic product nutritional values when brand is unknown
+- Only ask for clarification when you genuinely cannot make any reasonable guess
+- List specific uncertain_items (only truly unclear food names)
+- Provide uncertainty_reasons (only for major unclear situations)
+- Set confidence_score between 0.0-1.0 (be generous with confidence for reasonable estimates)
+- For most situations with identifiable food, set has_uncertainty to false, empty arrays, confidence_score 0.8+"""
 
             print("Requesting structured nutrition data from OpenAI...")
+            print(f"Input text for parsing: {text[:200]}...")
             
             response = await asyncio.to_thread(
                 self.client.beta.chat.completions.parse,
@@ -228,7 +279,17 @@ Uncertainty Assessment:
                 response_format=NutritionParseResponse
             )
             
+            print(f"OpenAI structured parsing response: {response}")
+            
+            if not response.choices or not response.choices[0].message:
+                print("No valid response from structured parsing")
+                return None
+                
             parsed_data = response.choices[0].message.parsed
+            if not parsed_data:
+                print("No parsed data from structured response")
+                return None
+                
             print(f"Successfully parsed {len(parsed_data.food_items)} food items")
             print(f"Uncertainty detected: {parsed_data.uncertainty.has_uncertainty}")
             
@@ -277,6 +338,9 @@ Uncertainty Assessment:
                 
         except Exception as e:
             print(f"Error parsing nutrition response: {e}")
+            print(f"Exception type: {type(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             return None
 
     async def analyze_with_clarification(self, 
